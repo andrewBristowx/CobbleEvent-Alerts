@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "cobbleeventalerts",
+  "version": "${version}",
+  "name": "CobbleEvent Alerts",
+  "description": "Server-side nearby alerts for special Cobblemon spawns.",
+  "authors": ["andrewBristowx"],
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.andrewbristowx.cobbleeventalerts.CobbleEventAlerts"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.17.2",
+    "fabric-api": "*",
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "cobblemon": ">=1.7.3"
+  }
+}
