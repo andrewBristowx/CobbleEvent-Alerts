@@ -1,0 +1,33 @@
+package com.andrewbristowx.cobbleeventalerts;
+
+import com.andrewbristowx.cobbleeventalerts.alert.SpawnAlertService;
+import com.andrewbristowx.cobbleeventalerts.command.AlertsCommand;
+import com.andrewbristowx.cobbleeventalerts.config.AlertsConfig;
+import com.cobblemon.mod.common.api.Priority;
+import com.cobblemon.mod.common.api.events.CobblemonEvents;
+import kotlin.Unit;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public final class CobbleEventAlerts implements ModInitializer {
+    public static final String MOD_ID = "cobbleeventalerts";
+    public static final Logger LOGGER = LoggerFactory.getLogger("CobbleEvent Alerts");
+
+    @Override
+    public void onInitialize() {
+        AlertsConfig.load();
+
+        CobblemonEvents.POKEMON_ENTITY_SPAWN.subscribe(Priority.LOWEST, event -> {
+            SpawnAlertService.handleSpawn(event);
+            return Unit.INSTANCE;
+        });
+
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                AlertsCommand.register(dispatcher)
+        );
+
+        LOGGER.info("CobbleEvent Alerts 0.1.0-alpha.1 enabled: nearby legendary and shiny spawn alerts active.");
+    }
+}
