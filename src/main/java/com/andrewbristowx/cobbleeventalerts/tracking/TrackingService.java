@@ -25,6 +25,11 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class TrackingService {
+    /**
+     * Alerts are keyed by Cobblemon's persistent Pokemon UUID, not the temporary Minecraft entity UUID.
+     * This is important because PokemonCapturedEvent exposes the Pokemon UUID while world lookup needs
+     * the entity UUID. ActiveAlert stores both identifiers so capture resolution and live tracking agree.
+     */
     private static final Map<UUID, ActiveAlert> ACTIVE_ALERTS = new HashMap<>();
     private static final Map<UUID, PlayerTrack> PLAYER_TRACKS = new HashMap<>();
     private static long serverTicks;
@@ -44,11 +49,14 @@ public final class TrackingService {
             recipientIds.add(recipient.getUUID());
         }
 
+        UUID pokemonUuid = entity.getPokemon().getUuid();
+        UUID entityUuid = entity.getUUID();
         UUID trackerOwnerId = trackerOwner == null ? null : trackerOwner.getUUID();
         ACTIVE_ALERTS.put(
-                entity.getUUID(),
+                pokemonUuid,
                 new ActiveAlert(
-                        entity.getUUID(),
+                        pokemonUuid,
+                        entityUuid,
                         entity.level().dimension(),
                         pokemonName,
                         kind,
@@ -79,7 +87,7 @@ public final class TrackingService {
         }
 
         ServerLevel level = player.server.getLevel(alert.dimension());
-        Entity entity = level == null ? null : level.getEntity(pokemonUuid);
+        Entity entity = level == null ? null : level.getEntity(alert.entityUuid());
         if (!(entity instanceof PokemonEntity) || entity.isRemoved()) {
             player.sendSystemMessage(
                     Component.literal("Ese Pokémon ya no está disponible para seguimiento.")
@@ -123,7 +131,7 @@ public final class TrackingService {
             return;
         }
 
-        clearTrackersFor(pokemonUuid, "El Pokémon fue capturado.");
+        clearTrackersFor(pokemonUuid);
 
         if (AlertsConfig.get().announceCapture) {
             MinecraftServer server = event.getPlayer().server;
@@ -132,6 +140,7 @@ public final class TrackingService {
                 if (recipient == null) {
                     continue;
                 }
+                recipient.displayClientMessage(Component.empty(), true);
                 recipient.sendSystemMessage(
                         Component.literal("✦ " + alert.pokemonName() + " CAPTURADO ✦")
                                 .withStyle(alert.kind() == AlertKind.SHINY ? ChatFormatting.AQUA : ChatFormatting.GOLD, ChatFormatting.BOLD)
@@ -146,10 +155,12 @@ public final class TrackingService {
         }
 
         CobbleEventAlerts.LOGGER.info(
-                "Tracked alert resolved by capture: {} {} captured by {}",
+                "Tracked alert resolved by capture: {} {} captured by {} (pokemonUuid={}, entityUuid={})",
                 alert.kind(),
                 alert.pokemonName(),
-                event.getPlayer().getGameProfile().getName()
+                event.getPlayer().getGameProfile().getName(),
+                alert.pokemonUuid(),
+                alert.entityUuid()
         );
     }
 
@@ -170,12 +181,14 @@ public final class TrackingService {
             Map.Entry<UUID, ActiveAlert> entry = alertIterator.next();
             ActiveAlert alert = entry.getValue();
             ServerLevel level = server.getLevel(alert.dimension());
-            Entity entity = level == null ? null : level.getEntity(alert.pokemonUuid());
+            Entity entity = level == null ? null : level.getEntity(alert.entityUuid());
 
             if (entity instanceof PokemonEntity && !entity.isRemoved()) {
                 alert.lastKnownPosition = entity.blockPosition();
                 alert.missingTicks = 0;
             } else {
+                // Do not immediately mark the alert as disappeared. Captures remove the world entity
+                // before/around POKEMON_CAPTURED, and that event resolves this record by Pokemon UUID.
                 alert.missingTicks += interval;
                 int graceTicks = Math.max(20, config.disappearanceGraceSeconds * 20);
                 if (alert.missingTicks >= graceTicks) {
@@ -209,7 +222,7 @@ public final class TrackingService {
             }
 
             ServerLevel level = server.getLevel(alert.dimension());
-            Entity entity = level == null ? null : level.getEntity(alert.pokemonUuid());
+            Entity entity = level == null ? null : level.getEntity(alert.entityUuid());
             if (entity == null || entity.isRemoved()) {
                 continue;
             }
@@ -271,12 +284,13 @@ public final class TrackingService {
     }
 
     private static void finishDisappeared(MinecraftServer server, ActiveAlert alert) {
-        clearTrackersFor(alert.pokemonUuid(), "El Pokémon ya no está disponible.");
+        clearTrackersFor(alert.pokemonUuid());
 
         if (AlertsConfig.get().announceDisappearance) {
             for (UUID recipientId : alert.recipients()) {
                 ServerPlayer recipient = server.getPlayerList().getPlayer(recipientId);
                 if (recipient != null) {
+                    recipient.displayClientMessage(Component.empty(), true);
                     recipient.sendSystemMessage(
                             Component.literal("✦ " + alert.pokemonName() + " ha desaparecido ✦")
                                     .withStyle(ChatFormatting.DARK_GRAY)
@@ -286,16 +300,18 @@ public final class TrackingService {
         }
 
         CobbleEventAlerts.LOGGER.info(
-                "Tracked alert expired/disappeared: {} {} last seen at {} {} {}",
+                "Tracked alert expired/disappeared: {} {} last seen at {} {} {} (pokemonUuid={}, entityUuid={})",
                 alert.kind(),
                 alert.pokemonName(),
                 alert.lastKnownPosition.getX(),
                 alert.lastKnownPosition.getY(),
-                alert.lastKnownPosition.getZ()
+                alert.lastKnownPosition.getZ(),
+                alert.pokemonUuid(),
+                alert.entityUuid()
         );
     }
 
-    private static void clearTrackersFor(UUID pokemonUuid, String reason) {
+    private static void clearTrackersFor(UUID pokemonUuid) {
         Iterator<Map.Entry<UUID, PlayerTrack>> iterator = PLAYER_TRACKS.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<UUID, PlayerTrack> entry = iterator.next();
@@ -313,6 +329,7 @@ public final class TrackingService {
 
     private static final class ActiveAlert {
         private final UUID pokemonUuid;
+        private final UUID entityUuid;
         private final ResourceKey<Level> dimension;
         private final String pokemonName;
         private final AlertKind kind;
@@ -323,6 +340,7 @@ public final class TrackingService {
 
         private ActiveAlert(
                 UUID pokemonUuid,
+                UUID entityUuid,
                 ResourceKey<Level> dimension,
                 String pokemonName,
                 AlertKind kind,
@@ -332,6 +350,7 @@ public final class TrackingService {
                 int missingTicks
         ) {
             this.pokemonUuid = pokemonUuid;
+            this.entityUuid = entityUuid;
             this.dimension = dimension;
             this.pokemonName = pokemonName;
             this.kind = kind;
@@ -343,6 +362,10 @@ public final class TrackingService {
 
         private UUID pokemonUuid() {
             return pokemonUuid;
+        }
+
+        private UUID entityUuid() {
+            return entityUuid;
         }
 
         private ResourceKey<Level> dimension() {
