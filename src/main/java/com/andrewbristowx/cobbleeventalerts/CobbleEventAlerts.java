@@ -37,6 +37,6 @@ public final class CobbleEventAlerts implements ModInitializer {
                 AlertsCommand.register(dispatcher)
         );
 
-        LOGGER.info("CobbleEvent Alerts 0.1.0-alpha.2 enabled: owner-only tracking and spawn lifecycle alerts active.");
+        LOGGER.info("CobbleEvent Alerts 0.1.0-alpha.3 enabled: capture UUID mapping hotfix active.");
     }
 }
