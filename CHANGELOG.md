@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0-alpha.2
+
+- Adds owner-only live tracking for special wild Pokémon.
+- Uses Cobblemon's natural PlayerSpawner cause to identify the exact player whose spawn cycle created the Pokémon.
+- All nearby recipients still receive the normal alert and exact coordinates, but only the spawn-owner receives the clickable tracking button.
+- Adds `/cobbleeventalerts track <uuid>` with server-side ownership validation and `/cobbleeventalerts untrack`.
+- Adds a live Action Bar tracker with relative direction arrow and current distance.
+- Adds initial distance and cardinal direction to alerts.
+- Makes coordinates clickable/copyable when enabled.
+- Adds capture resolution messages for previously announced Pokémon.
+- Adds disappearance handling with a configurable grace period.
+- Adds configurable tracking duration and update interval.
+- Logs tracker owner, capture resolution and disappearance details to the server log.
+
 ## 0.1.0-alpha.1
 
 - Adds nearby personalized alerts for naturally spawned legendary Pokémon.
