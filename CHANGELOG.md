@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.3
+
+- Fixes announced Pokémon being reported as disappeared after a successful capture.
+- Tracks Cobblemon's persistent Pokémon UUID separately from the temporary Minecraft entity UUID.
+- Uses the persistent Pokémon UUID for `POKEMON_CAPTURED` matching and tracker commands.
+- Keeps the entity UUID exclusively for live world position lookup.
+- Clears the active Action Bar immediately when the announced Pokémon is captured.
+
 ## 0.1.0-alpha.2
 
 - Adds owner-only live tracking for special wild Pokémon.
