@@ -2,6 +2,7 @@ package com.andrewbristowx.cobbleeventalerts.alert;
 
 import com.andrewbristowx.cobbleeventalerts.CobbleEventAlerts;
 import com.andrewbristowx.cobbleeventalerts.config.AlertsConfig;
+import com.andrewbristowx.cobbleeventalerts.tracking.TrackingService;
 import com.cobblemon.mod.common.api.events.entity.SpawnEvent;
 import com.cobblemon.mod.common.api.pokemon.labels.CobblemonPokemonLabels;
 import com.cobblemon.mod.common.entity.pokemon.PokemonEntity;
@@ -9,7 +10,9 @@ import com.cobblemon.mod.common.pokemon.Pokemon;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -17,8 +20,11 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.Entity;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -78,26 +84,35 @@ public final class SpawnAlertService {
         BlockPos pos = entity.blockPosition();
         double radiusSquared = (double) radius * radius;
 
-        int recipients = 0;
+        List<ServerPlayer> recipients = new ArrayList<>();
         for (ServerPlayer player : level.players()) {
-            if (player.distanceToSqr(entity) > radiusSquared) {
-                continue;
+            if (player.distanceToSqr(entity) <= radiusSquared) {
+                recipients.add(player);
             }
-            sendAlert(player, kind, pokemonName, pos, level);
-            recipients++;
         }
 
-        if (recipients > 0) {
-            CobbleEventAlerts.LOGGER.info(
-                    "Sent {} alert for {} at {} {} {} to {} nearby player(s)",
-                    kind,
-                    pokemonName,
-                    pos.getX(),
-                    pos.getY(),
-                    pos.getZ(),
-                    recipients
-            );
+        if (recipients.isEmpty()) {
+            return;
         }
+
+        ServerPlayer trackerOwner = resolveTrackerOwner(event, recipients);
+        TrackingService.register(entity, kind, pokemonName, recipients, trackerOwner);
+
+        for (ServerPlayer player : recipients) {
+            boolean canTrack = trackerOwner != null && player.getUUID().equals(trackerOwner.getUUID());
+            sendAlert(player, kind, pokemonName, pos, level, entity.getUUID(), canTrack);
+        }
+
+        CobbleEventAlerts.LOGGER.info(
+                "Sent {} alert for {} at {} {} {} to {} nearby player(s); tracker owner={}",
+                kind,
+                pokemonName,
+                pos.getX(),
+                pos.getY(),
+                pos.getZ(),
+                recipients.size(),
+                trackerOwner == null ? "none" : trackerOwner.getGameProfile().getName()
+        );
     }
 
     public static void sendTest(ServerPlayer player, AlertKind kind) {
@@ -106,7 +121,28 @@ public final class SpawnAlertService {
             case SHINY -> "EEVEE";
             case LEGENDARY_SHINY -> "RAYQUAZA";
         };
-        sendAlert(player, kind, pokemonName, player.blockPosition(), player.serverLevel());
+        sendAlert(player, kind, pokemonName, player.blockPosition(), player.serverLevel(), null, false);
+    }
+
+    private static ServerPlayer resolveTrackerOwner(
+            SpawnEvent<PokemonEntity> event,
+            List<ServerPlayer> recipients
+    ) {
+        if (!AlertsConfig.get().trackingEnabled) {
+            return null;
+        }
+
+        Entity causeEntity = event.getSpawnablePosition().getCause().getEntity();
+        if (!(causeEntity instanceof ServerPlayer causePlayer)) {
+            return null;
+        }
+
+        for (ServerPlayer recipient : recipients) {
+            if (recipient.getUUID().equals(causePlayer.getUUID())) {
+                return causePlayer;
+            }
+        }
+        return null;
     }
 
     private static void sendAlert(
@@ -114,7 +150,9 @@ public final class SpawnAlertService {
             AlertKind kind,
             String pokemonName,
             BlockPos pos,
-            ServerLevel level
+            ServerLevel level,
+            UUID pokemonUuid,
+            boolean canTrack
     ) {
         AlertsConfig config = AlertsConfig.get();
 
@@ -127,12 +165,38 @@ public final class SpawnAlertService {
         player.sendSystemMessage(body);
 
         if (config.showCoordinates) {
+            String coordinatesText = "X: " + pos.getX() + "  Y: " + pos.getY() + "  Z: " + pos.getZ();
             MutableComponent coordinates = Component.literal("⌖ Coordenadas: ")
                     .withStyle(ChatFormatting.DARK_GRAY)
-                    .append(Component.literal(
-                            "X: " + pos.getX() + "  Y: " + pos.getY() + "  Z: " + pos.getZ()
-                    ).withStyle(ChatFormatting.WHITE));
+                    .append(Component.literal(coordinatesText).withStyle(style -> {
+                        style = style.withColor(ChatFormatting.WHITE);
+                        if (config.clickableCoordinates) {
+                            style = style.withClickEvent(new ClickEvent(
+                                    ClickEvent.Action.COPY_TO_CLIPBOARD,
+                                    pos.getX() + " " + pos.getY() + " " + pos.getZ()
+                            ));
+                            style = style.withHoverEvent(new HoverEvent(
+                                    HoverEvent.Action.SHOW_TEXT,
+                                    Component.literal("Haz clic para copiar las coordenadas")
+                            ));
+                        }
+                        return style;
+                    }));
             player.sendSystemMessage(coordinates);
+        }
+
+        if (config.showDistanceAndDirection) {
+            int distance = (int) Math.round(Math.sqrt(player.distanceToSqr(
+                    pos.getX() + 0.5D,
+                    pos.getY() + 0.5D,
+                    pos.getZ() + 0.5D
+            )));
+            player.sendSystemMessage(
+                    Component.literal("↗ Distancia: ")
+                            .withStyle(ChatFormatting.DARK_GRAY)
+                            .append(Component.literal(distance + " bloques • " + cardinalDirection(player, pos))
+                                    .withStyle(ChatFormatting.YELLOW))
+            );
         }
 
         if (config.showDimension) {
@@ -143,8 +207,41 @@ public final class SpawnAlertService {
             );
         }
 
+        if (canTrack && pokemonUuid != null) {
+            player.sendSystemMessage(
+                    Component.literal("[ ✦ SEGUIR POKÉMON ✦ ]")
+                            .withStyle(style -> style
+                                    .withColor(ChatFormatting.GREEN)
+                                    .withBold(true)
+                                    .withClickEvent(new ClickEvent(
+                                            ClickEvent.Action.RUN_COMMAND,
+                                            "/cobbleeventalerts track " + pokemonUuid
+                                    ))
+                                    .withHoverEvent(new HoverEvent(
+                                            HoverEvent.Action.SHOW_TEXT,
+                                            Component.literal("Solo tú puedes activar este seguimiento")
+                                    )))
+            );
+        }
+
         SoundEvent sound = resolveSound(kind, config);
         player.playNotifySound(sound, SoundSource.MASTER, config.soundVolume, config.soundPitch);
+    }
+
+    private static String cardinalDirection(ServerPlayer player, BlockPos target) {
+        double dx = target.getX() + 0.5D - player.getX();
+        double dz = target.getZ() + 0.5D - player.getZ();
+        double angle = Math.toDegrees(Math.atan2(dx, -dz));
+        angle = (angle + 360.0D) % 360.0D;
+
+        if (angle < 22.5D || angle >= 337.5D) return "Norte";
+        if (angle < 67.5D) return "Noreste";
+        if (angle < 112.5D) return "Este";
+        if (angle < 157.5D) return "Sureste";
+        if (angle < 202.5D) return "Sur";
+        if (angle < 247.5D) return "Suroeste";
+        if (angle < 292.5D) return "Oeste";
+        return "Noroeste";
     }
 
     private static MutableComponent title(AlertKind kind) {
