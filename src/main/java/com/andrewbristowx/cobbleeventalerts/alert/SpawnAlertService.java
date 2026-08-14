@@ -98,9 +98,10 @@ public final class SpawnAlertService {
         ServerPlayer trackerOwner = resolveTrackerOwner(event, recipients);
         TrackingService.register(entity, kind, pokemonName, recipients, trackerOwner);
 
+        UUID trackedPokemonUuid = pokemon.getUuid();
         for (ServerPlayer player : recipients) {
             boolean canTrack = trackerOwner != null && player.getUUID().equals(trackerOwner.getUUID());
-            sendAlert(player, kind, pokemonName, pos, level, entity.getUUID(), canTrack);
+            sendAlert(player, kind, pokemonName, pos, level, trackedPokemonUuid, canTrack);
         }
 
         CobbleEventAlerts.LOGGER.info(
